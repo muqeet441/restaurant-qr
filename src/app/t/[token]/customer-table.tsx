@@ -12,6 +12,7 @@ import { CartSheet } from "./cart-sheet";
 import { OrdersView, useSessionOrders } from "./orders-view";
 import { BillCard } from "./bill-card";
 import { ServicePanel } from "./service-panel";
+import { CATEGORY_ICON, FoodArt, foodKind } from "./food-art";
 
 type State =
   | { kind: "loading" }
@@ -238,26 +239,39 @@ function TableApp({
   const sheetItem = sheet?.type === "item" ? menu?.items.get(sheet.itemId) : undefined;
   const editing = sheet?.type === "item" && sheet.editKey ? cart.lines.find((l) => l.key === sheet.editKey) : undefined;
 
+  // One tap adds items that need no choices; anything with sizes or required
+  // extras opens the item sheet instead.
+  const canQuickAdd = (item: MenuItem) =>
+    item.is_available &&
+    item.variations.filter((v) => v.is_active).length <= 1 &&
+    item.groups.every((g) => g.min_select === 0);
+  const quickAdd = (item: MenuItem) => {
+    const only = item.variations.find((v) => v.is_active);
+    setCart((c) => ({
+      ...c,
+      lines: [
+        ...c.lines,
+        { key: newKey(), menu_item_id: item.id, variation_id: only?.id ?? null, add_on_ids: [], quantity: 1, special_instructions: "" },
+      ],
+    }));
+    setToast(`${item.name} added`);
+  };
+
   return (
     <div className="mx-auto min-h-screen max-w-lg pb-28">
-      <div className="flex items-start gap-3 px-4 pt-6">
-        <div className="min-w-0 flex-1">
-          <Header info={info} />
-        </div>
-        <ServicePanel sessionId={sessionId} />
-      </div>
+      <Hero info={info} help={<ServicePanel sessionId={sessionId} onDark />} />
 
-      <div className="sticky top-0 z-30 border-b border-line bg-bg/95 px-4 backdrop-blur">
-        <div className="flex gap-6" role="tablist">
+      <div className="sticky top-0 z-30 bg-bg/90 px-4 pb-2 pt-3 backdrop-blur-md">
+        <div className="grid grid-cols-2 rounded-full bg-muted p-1" role="tablist">
           {(["menu", "orders"] as const).map((t) => (
             <button
               key={t}
               role="tab"
               aria-selected={tab === t}
               onClick={() => setTab(t)}
-              className={`border-b-2 py-3 text-sm font-medium ${tab === t ? "border-brand text-ink" : "border-transparent text-ink-soft"}`}
+              className={`rounded-full py-2 text-sm font-semibold transition ${tab === t ? "bg-surface text-ink shadow-sm" : "text-ink-soft"}`}
             >
-              {t === "menu" ? "Menu" : "My orders"}
+              {t === "menu" ? "🍕 Menu" : "🧾 My orders"}
               {t === "orders" && activeOrders > 0 && (
                 <span className="ml-1.5 rounded-full bg-brand px-1.5 py-0.5 text-[10px] text-white">{activeOrders}</span>
               )}
@@ -265,9 +279,14 @@ function TableApp({
           ))}
         </div>
         {tab === "menu" && menu && menu.categories.length > 1 && (
-          <nav className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-3" aria-label="Categories">
+          <nav className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" aria-label="Categories">
             {menu.categories.map((c) => (
-              <a key={c.id} href={`#cat-${c.id}`} className="whitespace-nowrap rounded-full border border-line bg-surface px-3 py-1 text-xs">
+              <a
+                key={c.id}
+                href={`#cat-${c.id}`}
+                className="flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 py-1.5 text-sm font-medium shadow-sm active:scale-95"
+              >
+                <span aria-hidden>{categoryIcon(c.name)}</span>
                 {c.name}
               </a>
             ))}
@@ -275,7 +294,7 @@ function TableApp({
         )}
       </div>
 
-      <div className="px-4 pt-4">
+      <div className="px-4 pt-3">
         {tab === "orders" ? (
           <div className="space-y-4">
             <OrdersView orders={orders} reload={reload} money={money} onOrderMore={() => setTab("menu")} />
@@ -297,15 +316,50 @@ function TableApp({
         ) : menu.categories.length === 0 ? (
           <p className="py-8 text-center text-ink-soft">The menu is being prepared.</p>
         ) : (
-          <div className="space-y-8">
+          <div className="space-y-9">
+            {(() => {
+              const popular = menu.categories
+                .flatMap((c) => c.items.map((i) => ({ ...i, categoryName: c.name })))
+                .filter((i) => i.is_available && i.dietary_tags.some((t) => /popular|best/i.test(t)));
+              if (popular.length < 2) return null;
+              return (
+                <section aria-label="Popular right now">
+                  <h2 className="mb-3 flex items-center gap-2 text-lg font-bold">🔥 Popular right now</h2>
+                  <ul className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none]">
+                    {popular.map((i) => (
+                      <li key={i.id} className="w-40 shrink-0 snap-start">
+                        <FeaturedCard
+                          item={i}
+                          category={i.categoryName}
+                          money={money}
+                          onOpen={() => setSheet({ type: "item", itemId: i.id })}
+                          onQuickAdd={canQuickAdd(i) ? () => quickAdd(i) : undefined}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              );
+            })()}
+
             {menu.categories.map((c) => (
-              <section key={c.id} id={`cat-${c.id}`} className="scroll-mt-28">
-                <h2 className="text-lg font-semibold">{c.name}</h2>
-                {c.description && <p className="text-sm text-ink-soft">{c.description}</p>}
-                <ul className="mt-3 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
+              <section key={c.id} id={`cat-${c.id}`} className="scroll-mt-36">
+                <h2 className="flex items-center gap-2 text-xl font-bold">
+                  <span aria-hidden>{categoryIcon(c.name)}</span>
+                  {c.name}
+                  <span className="text-sm font-normal text-ink-soft">· {c.items.length}</span>
+                </h2>
+                {c.description && <p className="mt-0.5 text-sm text-ink-soft">{c.description}</p>}
+                <ul className="mt-3 space-y-3">
                   {c.items.map((i) => (
                     <li key={i.id}>
-                      <ItemRow item={i} money={money} onOpen={() => setSheet({ type: "item", itemId: i.id })} />
+                      <ItemCard
+                        item={i}
+                        category={c.name}
+                        money={money}
+                        onOpen={() => setSheet({ type: "item", itemId: i.id })}
+                        onQuickAdd={canQuickAdd(i) ? () => quickAdd(i) : undefined}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -335,6 +389,7 @@ function TableApp({
         <ItemSheet
           key={sheet.editKey ?? sheet.itemId}
           item={sheetItem}
+          category={menu?.categories.find((c) => c.id === sheetItem.category_id)?.name}
           editing={editing}
           money={money}
           onClose={() => setSheet(editing ? { type: "cart" } : null)}
@@ -374,26 +429,175 @@ function TableApp({
   );
 }
 
-function ItemRow({ item, money, onOpen }: { item: MenuItem; money: Intl.NumberFormat; onOpen: () => void }) {
-  const photo = imageUrl(item.image_path);
-  const deltas = item.variations.map((v) => Number(v.price_delta));
-  const from = item.base_price + (deltas.length ? Math.min(...deltas) : 0);
+// --- Menu presentation ------------------------------------------------------
+
+const TAG_STYLE: [RegExp, string, string][] = [
+  [/popular|best/i, "🔥 Popular", "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200"],
+  [/chef/i, "👨‍🍳 Chef's pick", "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"],
+  [/new/i, "✨ New", "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-200"],
+  [/spicy|hot/i, "🌶️ Spicy", "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200"],
+  [/veg/i, "🌱 Veg", "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"],
+  [/value|deal|save/i, "💰 Great value", "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200"],
+];
+
+function Badges({ tags, max = 3 }: { tags: string[]; max?: number }) {
+  const shown = TAG_STYLE.filter(([re]) => tags.some((t) => re.test(t))).slice(0, max);
+  if (!shown.length) return null;
   return (
-    <button onClick={onOpen} className={`flex w-full gap-4 p-4 text-left hover:bg-muted/50 ${item.is_available ? "" : "opacity-60"}`}>
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">{item.name}</p>
-        {item.description && <p className="mt-0.5 line-clamp-2 text-sm text-ink-soft">{item.description}</p>}
-        <p className="mt-1.5 text-sm font-medium tabular-nums">
-          {deltas.length > 1 && "from "}
-          {money.format(Math.max(from, 0))}
-          {!item.is_available && <span className="ml-2 text-xs font-normal text-ink-soft">Unavailable</span>}
+    <div className="flex flex-wrap gap-1">
+      {shown.map(([, label, cls]) => (
+        <span key={label} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${cls}`}>
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function priceFrom(item: MenuItem) {
+  const deltas = item.variations.map((v) => Number(v.price_delta));
+  return { from: Math.max(item.base_price + (deltas.length ? Math.min(...deltas) : 0), 0), sizes: deltas.length > 1 };
+}
+
+function Visual({ item, category, className }: { item: MenuItem; category: string; className: string }) {
+  const photo = imageUrl(item.image_path);
+  return photo ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={photo} alt="" loading="lazy" className={`${className} object-cover`} />
+  ) : (
+    <FoodArt name={item.name} category={category} className={className} />
+  );
+}
+
+function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="grid size-9 place-items-center rounded-full bg-brand text-xl font-bold leading-none text-white shadow-md ring-4 ring-surface transition active:scale-90"
+    >
+      +
+    </button>
+  );
+}
+
+function ItemCard({
+  item,
+  category,
+  money,
+  onOpen,
+  onQuickAdd,
+}: {
+  item: MenuItem;
+  category: string;
+  money: Intl.NumberFormat;
+  onOpen: () => void;
+  onQuickAdd?: () => void;
+}) {
+  const { from, sizes } = priceFrom(item);
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen()}
+      className={`flex w-full cursor-pointer gap-3 rounded-2xl border border-line bg-surface p-3 text-left shadow-sm transition hover:shadow-md active:scale-[0.99] ${
+        item.is_available ? "" : "opacity-55 grayscale"
+      }`}
+    >
+      <div className="min-w-0 flex-1 py-0.5">
+        <Badges tags={item.dietary_tags} max={2} />
+        <p className="mt-1 font-semibold leading-snug">{item.name}</p>
+        {item.description && <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-ink-soft">{item.description}</p>}
+        <p className="mt-2 text-[15px] font-bold tabular-nums text-brand">
+          {sizes && <span className="mr-1 text-xs font-medium text-ink-soft">from</span>}
+          {money.format(from)}
+          {!item.is_available && <span className="ml-2 text-xs font-medium text-ink-soft">Sold out</span>}
         </p>
       </div>
-      {photo && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={photo} alt="" loading="lazy" className="size-20 shrink-0 rounded-lg object-cover" />
-      )}
-    </button>
+      <div className="relative shrink-0">
+        <Visual item={item} category={category} className="size-28 rounded-xl" />
+        {item.is_available && (
+          <span className="absolute -bottom-2 -right-2">
+            <AddButton label={`Add ${item.name}`} onClick={onQuickAdd ?? onOpen} />
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FeaturedCard({
+  item,
+  category,
+  money,
+  onOpen,
+  onQuickAdd,
+}: {
+  item: MenuItem;
+  category: string;
+  money: Intl.NumberFormat;
+  onOpen: () => void;
+  onQuickAdd?: () => void;
+}) {
+  const { from, sizes } = priceFrom(item);
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen()}
+      className="flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-sm active:scale-[0.98]"
+    >
+      <div className="relative">
+        <Visual item={item} category={category} className="aspect-square w-full" />
+        <span className="absolute bottom-2 right-2">
+          <AddButton label={`Add ${item.name}`} onClick={onQuickAdd ?? onOpen} />
+        </span>
+      </div>
+      <div className="flex flex-1 flex-col p-2.5">
+        <p className="line-clamp-2 text-sm font-semibold leading-snug">{item.name}</p>
+        <p className="mt-auto pt-1 text-sm font-bold tabular-nums text-brand">
+          {sizes && <span className="mr-1 text-[11px] font-medium text-ink-soft">from</span>}
+          {money.format(from)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function categoryIcon(name: string) {
+  if (/side|snack|starter|appet/i.test(name)) return "🍟";
+  if (/dessert|sweet/i.test(name)) return "🍫";
+  return CATEGORY_ICON[foodKind(name, name)] ?? "🍽️";
+}
+
+function Hero({ info, help }: { info: JoinResult; help?: React.ReactNode }) {
+  return (
+    <header className="relative overflow-hidden bg-gradient-to-br from-orange-500 via-red-600 to-rose-700 px-5 pb-7 pt-6 text-white">
+      <svg aria-hidden viewBox="0 0 200 200" className="pointer-events-none absolute -right-10 -top-12 size-56 opacity-20">
+        <circle cx="100" cy="100" r="90" fill="#fde68a" />
+        <circle cx="100" cy="100" r="76" fill="#fbbf24" />
+        {[[70, 70], [130, 65], [140, 120], [85, 135], [55, 110], [105, 100]].map(([x, y]) => (
+          <circle key={`${x}${y}`} cx={x} cy={y} r="11" fill="#b91c1c" />
+        ))}
+      </svg>
+      <div className="relative flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/80">Welcome to</p>
+          <h1 className="mt-1 text-3xl font-black leading-tight tracking-tight">{info.restaurant.name}</h1>
+          {info.restaurant.description && <p className="mt-1 text-sm text-white/85">{info.restaurant.description}</p>}
+          <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-sm font-semibold backdrop-blur">
+            🪑 Table {info.table.table_number}
+          </span>
+        </div>
+        <div className="shrink-0">{help}</div>
+      </div>
+    </header>
   );
 }
 

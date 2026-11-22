@@ -4,6 +4,7 @@ import { useState } from "react";
 import { imageUrl, unitPrice, validateSelection, type CartLine, type MenuItem } from "@/lib/menu";
 import { btnPrimary } from "@/components/ui";
 import { Sheet } from "./sheet";
+import { FoodArt } from "./food-art";
 
 function defaultLine(item: MenuItem): Omit<CartLine, "key"> {
   const active = item.variations.filter((v) => v.is_active);
@@ -18,12 +19,14 @@ function defaultLine(item: MenuItem): Omit<CartLine, "key"> {
 
 export function ItemSheet({
   item,
+  category,
   editing,
   money,
   onSave,
   onClose,
 }: {
   item: MenuItem;
+  category?: string;
   editing?: CartLine;
   money: Intl.NumberFormat;
   onSave: (line: Omit<CartLine, "key">) => void;
@@ -92,9 +95,11 @@ export function ItemSheet({
         </div>
       }
     >
-      {photo && (
+      {photo ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={photo} alt="" className="-mx-5 -mt-4 mb-4 aspect-[16/10] w-[calc(100%+2.5rem)] max-w-none object-cover" />
+      ) : (
+        <FoodArt name={item.name} category={category} className="-mx-5 -mt-4 mb-4 block aspect-[16/9] w-[calc(100%+2.5rem)] max-w-none" />
       )}
       {item.description && <p className="text-sm text-ink-soft">{item.description}</p>}
       {(item.allergens.length > 0 || item.dietary_tags.length > 0) && (

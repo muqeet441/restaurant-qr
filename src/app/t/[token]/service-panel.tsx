@@ -23,7 +23,7 @@ const LABEL: Record<RequestType, string> = {
 };
 
 /** Customer assistance (Module 5): requests and their live status. */
-export function ServicePanel({ sessionId }: { sessionId: string }) {
+export function ServicePanel({ sessionId, onDark = false }: { sessionId: string; onDark?: boolean }) {
   const [open, setOpen] = useState(false);
   const [requests, setRequests] = useState<Req[]>([]);
   const [note, setNote] = useState("");
@@ -85,7 +85,9 @@ export function ServicePanel({ sessionId }: { sessionId: string }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="rounded-full border border-line bg-surface px-3 py-1.5 text-sm font-medium shadow-sm"
+        className={`rounded-full border px-3 py-1.5 text-sm font-semibold shadow-sm ${
+          onDark ? "border-white/30 bg-white/15 text-white backdrop-blur" : "border-line bg-surface"
+        }`}
         aria-label="Ask for help"
       >
         🙋 Help
