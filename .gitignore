@@ -55,3 +55,4 @@ supabase/setup/
 
 # local demo script (contains demo staff passwords)
 scripts/demo-flow.mjs
+scripts/setup-brick-oven.mjs
