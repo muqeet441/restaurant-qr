@@ -1,5 +1,6 @@
 # Nightly database backup (NFR-016). Supabase's free plan has no downloadable
 # backups, so this keeps 14 days of encrypted dumps as workflow artifacts.
+# Skips (with a notice) until the secrets below are configured.
 #
 # Repository secrets:
 #   SUPABASE_DB_URL       – Project Settings → Database → Connection string → URI
@@ -18,17 +19,28 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
     steps:
+      - name: Skip until secrets are configured
+        id: cfg
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::notice::Backup secrets not set, skipping. See docs/DEPLOY.md section 6."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Install PostgreSQL 17 client
+        if: steps.cfg.outputs.ready == 'true'
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
       - name: Dump, compress, encrypt
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        if: steps.cfg.outputs.ready == 'true'
         run: |
           set -euo pipefail
           stamp=$(date -u +%Y%m%d-%H%M)
@@ -37,7 +49,8 @@ jobs:
             | gzip -9 \
             | gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" -c -o "backup-$stamp.sql.gz.gpg"
           ls -lh backup-*.gpg
-      - uses: actions/upload-artifact@v4
+      - if: steps.cfg.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
         with:
           name: db-backup-${{ github.run_id }}
           path: backup-*.sql.gz.gpg
