@@ -144,17 +144,27 @@ try {
   ok("customer can't change prices", (priceHack.data ?? []).length === 0);
 
   // Realtime: the customer should hear about the confirmation.
+  const { data: guestSession } = await guest.auth.getSession();
+  await guest.realtime.setAuth(guestSession.session.access_token);
+  let resolveHeard;
   const heard = new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 8000);
+    resolveHeard = resolve;
+    setTimeout(() => resolve(false), 10000);
+  });
+  const subscribed = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve("TIMED_OUT (no reply)"), 10000);
     guest
       .channel(`e2e:${session.id}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders", filter: `session_id=eq.${session.id}` }, () => {
-        clearTimeout(timer);
-        resolve(true);
-      })
-      .subscribe();
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders", filter: `session_id=eq.${session.id}` }, () => resolveHeard(true))
+      .subscribe((status, err) => {
+        if (status === "SUBSCRIBED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          clearTimeout(t);
+          resolve(status + (err ? `: ${err.message}` : ""));
+        }
+      });
   });
-  await new Promise((r) => setTimeout(r, 1500)); // let the subscription settle
+  ok("customer's live channel connects", subscribed === "SUBSCRIBED", subscribed);
+  await new Promise((r) => setTimeout(r, 1000));
 
   const order = await rpc(guest, "submit_order", {
     p_session_id: session.id,

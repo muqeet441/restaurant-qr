@@ -20,9 +20,9 @@ await db.exec(`
   create role service_role nologin bypassrls;
   create role supabase_auth_admin nologin;
   grant usage on schema public to anon, authenticated, service_role;
-  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
-  alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+  -- Newer Supabase projects do NOT auto-grant table access to the API roles,
+  -- so the migrations must grant everything explicitly. Mirror that here.
+  -- (Functions are still executable by PUBLIC by default, like stock Postgres.)
 
   create schema auth;
   create table auth.users (
@@ -1116,6 +1116,17 @@ console.log("Security & performance audit (Phase 6)");
        and not exists (select 1 from pg_index i where i.indrelid = c.conrelid and i.indkey[0] = c.conkey[1])
      order by 1`);
   check("every foreign key is indexed", fkNoIndex.length === 0, `\n      missing: ${fkNoIndex.join(", ")}`);
+
+  // The server (service role) creates staff and fixtures; triggers it fires must work.
+  await db.exec("set role service_role");
+  try {
+    await db.query("insert into public.restaurant_tables (restaurant_id, table_number) values ($1, 'SVC-1')", [R1]);
+    check("server role can create tables (triggers use app helpers)", true);
+  } catch (e) {
+    check("server role can create tables (triggers use app helpers)", false, e.message);
+  } finally {
+    await db.exec("reset role");
+  }
 
   // Rough timing (NFR-001). PGlite runs in WebAssembly, so a real Postgres is faster.
   const t = (await su("select id, qr_token from public.restaurant_tables where restaurant_id = $1 and table_number = '2'", [R1])).rows[0];
