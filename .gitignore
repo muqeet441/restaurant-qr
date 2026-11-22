@@ -49,3 +49,6 @@ supabase/.branches
 
 # generated SQL-editor bundle
 supabase/setup/
+
+.vercel
+.env*
