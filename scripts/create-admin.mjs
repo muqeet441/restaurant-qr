@@ -43,6 +43,11 @@ if (args.restaurant) {
     .single();
   if (error) fail(`Could not create restaurant: ${error.message}`);
   restaurant = data;
+  // Default flow: the customer's scan starts the visit; the cashier's close ends it.
+  await db
+    .from("restaurant_settings")
+    .update({ customer_can_open_session: true, require_cleaning: false })
+    .eq("restaurant_id", restaurant.id);
   console.log(`✓ Created restaurant "${restaurant.name}" (${restaurant.slug})`);
 } else if (!args.super) {
   const { data, error } = await db.from("restaurants").select().eq("slug", args.slug).maybeSingle();
