@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { subscribeAuthed } from "@/lib/supabase/realtime";
 import { friendlyError } from "@/lib/errors";
 import { Sheet } from "./sheet";
 
@@ -43,14 +44,15 @@ export function ServicePanel({ sessionId, onDark = false }: { sessionId: string;
 
   useEffect(() => {
     const supabase = createClient();
-    const channel = supabase
-      .channel(`guest-requests:${sessionId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "customer_service_requests", filter: `session_id=eq.${sessionId}` }, load)
-      .subscribe((s) => s === "SUBSCRIBED" && load());
-    const poll = setInterval(load, 30000);
+    const unsubscribe = subscribeAuthed(supabase, `guest-requests:${sessionId}`, (ch) =>
+      ch
+        .on("postgres_changes", { event: "*", schema: "public", table: "customer_service_requests", filter: `session_id=eq.${sessionId}` }, load)
+        .subscribe((s) => s === "SUBSCRIBED" && load()),
+    );
+    const poll = setInterval(load, 20000);
     return () => {
       clearInterval(poll);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, [sessionId, load]);
 

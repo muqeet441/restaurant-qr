@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { AppRole, Employee, Restaurant } from "@/lib/types";
@@ -12,38 +13,45 @@ export interface StaffContext {
 }
 
 /**
- * Loads the signed-in staff member and their restaurant, or redirects.
+ * Loads the signed-in staff member once per request (layouts, pages and
+ * server actions share the result). One verified-JWT check plus two parallel
+ * queries instead of several sequential round trips.
+ */
+const loadStaff = cache(async (): Promise<StaffContext | null> => {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getClaims();
+  const claims = data?.claims as { sub?: string; email?: string; is_anonymous?: boolean } | undefined;
+  if (!claims?.sub || claims.is_anonymous) return null;
+  const userId = claims.sub;
+
+  const [{ data: roleRows }, { data: employee }] = await Promise.all([
+    supabase.from("user_roles").select("role, restaurant_id, restaurants(*)").eq("user_id", userId),
+    supabase.from("employees").select("*").eq("user_id", userId).maybeSingle(),
+  ]);
+  const rows = (roleRows ?? []) as unknown as { role: AppRole; restaurant_id: string | null; restaurants: Restaurant | null }[];
+  const roles = rows.map((r) => r.role);
+  if (roles.length === 0) return { userId, email: claims.email ?? "", roles, restaurant: null as unknown as Restaurant, employee };
+
+  let restaurant = rows.find((r) => r.restaurants)?.restaurants ?? null;
+  if (!restaurant) {
+    // Super admin without a restaurant role: use the first restaurant.
+    const { data: first } = await supabase.from("restaurants").select("*").order("created_at").limit(1).maybeSingle();
+    restaurant = first;
+  }
+  return { userId, email: claims.email ?? "", roles, restaurant: restaurant as Restaurant, employee: (employee as Employee) ?? null };
+});
+
+/**
+ * The signed-in staff member and their restaurant, or a redirect.
  * `allowed` limits the page to those roles (super_admin always passes).
  */
 export async function requireStaff(allowed?: AppRole[]): Promise<StaffContext> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user || user.is_anonymous) redirect("/login");
-
-  const { data: roleRows } = await supabase
-    .from("user_roles")
-    .select("role, restaurant_id")
-    .eq("user_id", user.id);
-  const roles = (roleRows ?? []).map((r) => r.role as AppRole);
-  if (roles.length === 0) redirect("/staff");
-  if (allowed && !roles.some((r) => allowed.includes(r) || r === "super_admin")) redirect("/staff");
-
-  const restaurantId = roleRows?.find((r) => r.restaurant_id)?.restaurant_id as string | undefined;
-  const base = supabase.from("restaurants").select("*");
-  const { data: restaurant } = restaurantId
-    ? await base.eq("id", restaurantId).maybeSingle()
-    : await base.order("created_at").limit(1).maybeSingle(); // super admin without a restaurant role
-  if (!restaurant) redirect("/staff");
-
-  const { data: employee } = await supabase
-    .from("employees")
-    .select("*")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  return { userId: user.id, email: user.email ?? "", roles, restaurant, employee };
+  const ctx = await loadStaff();
+  if (!ctx) redirect("/login");
+  if (ctx.roles.length === 0) redirect("/staff");
+  if (allowed && !ctx.roles.some((r) => allowed.includes(r) || r === "super_admin")) redirect("/staff");
+  if (!ctx.restaurant) redirect("/staff");
+  return ctx;
 }
 
 export const isAdmin = (ctx: StaffContext) =>

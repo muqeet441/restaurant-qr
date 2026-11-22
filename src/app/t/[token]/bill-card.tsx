@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { subscribeAuthed } from "@/lib/supabase/realtime";
 import { friendlyError } from "@/lib/errors";
 import { FeedbackForm } from "./feedback-form";
 
@@ -43,14 +44,15 @@ export function BillCard({ sessionId, money, hasOrders }: { sessionId: string; m
 
   useEffect(() => {
     const supabase = createClient();
-    const channel = supabase
-      .channel(`guest-bill:${sessionId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "invoices", filter: `session_id=eq.${sessionId}` }, load)
-      .subscribe((s) => s === "SUBSCRIBED" && load());
-    const poll = setInterval(load, 30000);
+    const unsubscribe = subscribeAuthed(supabase, `guest-bill:${sessionId}`, (ch) =>
+      ch
+        .on("postgres_changes", { event: "*", schema: "public", table: "invoices", filter: `session_id=eq.${sessionId}` }, load)
+        .subscribe((s) => s === "SUBSCRIBED" && load()),
+    );
+    const poll = setInterval(load, 20000);
     return () => {
       clearInterval(poll);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, [sessionId, load]);
 

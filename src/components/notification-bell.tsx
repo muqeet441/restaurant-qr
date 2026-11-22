@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { subscribeAuthed } from "@/lib/supabase/realtime";
 
 type Note = { id: string; type: string; title: string; body: string | null; created_at: string; read_at: string | null };
 
@@ -70,14 +71,15 @@ export function NotificationBell({ userId }: { userId: string }) {
 
   useEffect(() => {
     const supabase = createClient();
-    const channel = supabase
-      .channel(`notes:${userId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notification_recipients", filter: `user_id=eq.${userId}` }, load)
-      .subscribe((s) => s === "SUBSCRIBED" && load());
-    const poll = setInterval(load, 60000);
+    const unsubscribe = subscribeAuthed(supabase, `notes:${userId}`, (ch) =>
+      ch
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "notification_recipients", filter: `user_id=eq.${userId}` }, load)
+        .subscribe((s) => s === "SUBSCRIBED" && load()),
+    );
+    const poll = setInterval(load, 30000);
     return () => {
       clearInterval(poll);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, [userId, load]);
 

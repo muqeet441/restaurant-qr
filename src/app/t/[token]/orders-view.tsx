@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { subscribeAuthed } from "@/lib/supabase/realtime";
 import { friendlyError } from "@/lib/errors";
 import { ORDER_STATUS_LABELS } from "@/lib/menu";
 
@@ -60,24 +61,26 @@ export function useSessionOrders(sessionId: string) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const refresh = () => {
       clearTimeout(timer);
-      timer = setTimeout(load, 200);
+      timer = setTimeout(load, 50);
     };
-    const channel = supabase
-      .channel(`guest-orders:${sessionId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `session_id=eq.${sessionId}` }, refresh)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "order_items" }, refresh)
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") refresh(); // includes the first load and every reconnect
-      });
+    const unsubscribe = subscribeAuthed(supabase, `guest-orders:${sessionId}`, (ch) =>
+      ch
+        .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `session_id=eq.${sessionId}` }, refresh)
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "order_items" }, refresh)
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") refresh(); // includes the first load and every reconnect
+        }),
+    );
+    refresh(); // don't wait for the socket for the first load
     // Safety net when Realtime is unavailable (e.g. a phone that slept).
-    const poll = setInterval(refresh, 30000);
+    const poll = setInterval(refresh, 20000);
     const onVisible = () => document.visibilityState === "visible" && refresh();
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearTimeout(timer);
       clearInterval(poll);
       document.removeEventListener("visibilitychange", onVisible);
-      supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, [sessionId, load]);
 

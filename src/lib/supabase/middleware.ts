@@ -14,6 +14,8 @@ const AREAS: { prefix: string; roles: AppRole[] }[] = [
   { prefix: "/staff", roles: ["super_admin", "admin", "manager", "waiter", "kitchen", "cashier"] },
 ];
 
+type Claims = { sub?: string; is_anonymous?: boolean; app_roles?: { role: AppRole }[] };
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
@@ -32,26 +34,30 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Refreshes the session cookie when needed. Keep this call.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Refreshes the session cookie when needed and verifies the JWT. With
+  // asymmetric signing keys this is a local check (no network round trip).
+  const { data } = await supabase.auth.getClaims();
+  const claims = (data?.claims ?? null) as Claims | null;
 
   const path = request.nextUrl.pathname;
   const area = AREAS.find((a) => path === a.prefix || path.startsWith(a.prefix + "/"));
   if (!area) return response;
 
-  if (!user || user.is_anonymous) {
+  if (!claims?.sub || claims.is_anonymous) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = `?next=${encodeURIComponent(path)}`;
     return NextResponse.redirect(url);
   }
-
   if (area.prefix === "/staff") return response;
 
-  const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", user.id);
-  const mine = (roles ?? []).map((r) => r.role as AppRole);
+  // Roles come from the access-token hook; fall back to the database only for
+  // tokens issued before the hook was enabled.
+  let mine = (claims.app_roles ?? []).map((r) => r.role);
+  if (!claims.app_roles) {
+    const { data: rows } = await supabase.from("user_roles").select("role").eq("user_id", claims.sub);
+    mine = (rows ?? []).map((r) => r.role as AppRole);
+  }
   if (!mine.some((r) => area.roles.includes(r))) {
     const url = request.nextUrl.clone();
     url.pathname = "/staff";

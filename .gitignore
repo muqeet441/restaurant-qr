@@ -57,3 +57,4 @@ supabase/setup/
 scripts/demo-flow.mjs
 scripts/setup-brick-oven.mjs
 scripts/brick-oven-menu.mjs
+scripts/speed-test.mjs
